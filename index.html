@@ -32,6 +32,11 @@
   <body>
     <div id="app"></div>
     <div id="error"></div>
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <script>
+      // LIFF 規範要求 endpoint 頁面呼叫 liff.init；在 LINE 之外（TG/瀏覽器）開啟時 init 也能正常 resolve
+      window.liff?.init({ liffId: '2012519525-9JLXzgxj' }).catch((e) => console.warn('liff init', e));
+    </script>
     <script type="module" src="./src/main.js"></script>
   </body>
 </html>
