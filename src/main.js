@@ -7,6 +7,8 @@ const SURFACE = 'dashboard';
 
 // AI-BOUNDARY: 只有 CoinGecko 支援瀏覽器 CORS，所有即時互動都走它；TWSE 走每日預抓
 const GECKO = 'https://api.coingecko.com/api/v3/simple/price';
+// AI-INVARIANT: COINS 清單必須與 scripts/gen-dashboard.mjs 的 COINS 一致
+const COINS = ['bitcoin', 'ethereum', 'solana', 'dogecoin', 'ripple', 'cardano'];
 
 let processor;
 
@@ -23,34 +25,30 @@ function priceLine(c, cur) {
   return `${sym}${c[cur].toLocaleString()}　${arrow}${Math.abs(Math.round(chg * 100) / 100)}%`;
 }
 
-async function fetchPrices(ids, cur) {
-  const res = await fetch(`${GECKO}?ids=${ids}&vs_currencies=${cur}&include_24hr_change=true`);
-  if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
-  return res.json();
+async function refreshCrypto(cur) {
+  setData('/crypto/status', '更新中…');
+  try {
+    const res = await fetch(`${GECKO}?ids=${COINS.join(',')}&vs_currencies=${cur}&include_24hr_change=true`);
+    if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
+    const px = await res.json();
+    for (const id of COINS) {
+      if (px[id]) setData(`/crypto/px/${id}`, priceLine(px[id], cur));
+    }
+    const t = new Date();
+    setData(
+      '/crypto/status',
+      `即時報價 ${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`
+    );
+  } catch (err) {
+    setData('/crypto/status', `更新失敗：${err.message}`);
+  }
 }
 
 async function handleAction(action) {
-  const ctx = action.context ?? {};
-  const rawCur = Array.isArray(ctx.currency) ? ctx.currency[0] : ctx.currency;
-  const cur = rawCur === 'twd' ? 'twd' : 'usd';
-  try {
-    if (action.name === 'refresh_crypto') {
-      const px = await fetchPrices('bitcoin,ethereum', cur);
-      setData('/crypto/btc', priceLine(px.bitcoin, cur));
-      setData('/crypto/eth', priceLine(px.ethereum, cur));
-    } else if (action.name === 'lookup_price') {
-      const id = (ctx.id || '').trim().toLowerCase();
-      if (!id) return void setData('/crypto/lookup', '先輸入一個 CoinGecko id');
-      setData('/crypto/lookup', '查詢中…');
-      const px = await fetchPrices(encodeURIComponent(id), cur);
-      setData(
-        '/crypto/lookup',
-        px[id] ? `${id}：${priceLine(px[id], cur)}` : `找不到「${id}」，確認一下 CoinGecko id`
-      );
-    }
-  } catch (err) {
-    setData('/crypto/lookup', `查詢失敗：${err.message}`);
-  }
+  if (action.name !== 'refresh_crypto') return;
+  const raw = action.context?.currency;
+  const cur = (Array.isArray(raw) ? raw[0] : raw) === 'twd' ? 'twd' : 'usd';
+  await refreshCrypto(cur);
 }
 
 async function main() {
@@ -66,6 +64,9 @@ async function main() {
     el.surface = surface;
     app.append(el);
   }
+
+  // 開頁即自動更新報價，每日預抓的資料只是首屏佔位
+  refreshCrypto('usd');
 }
 
 main().catch((err) => {

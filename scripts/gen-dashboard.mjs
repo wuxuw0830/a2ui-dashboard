@@ -63,18 +63,32 @@ async function twData() {
   return out;
 }
 
+// AI-INVARIANT: COINS 清單必須與 src/main.js 的 COINS 一致（同一組 id 與顯示名）
+const COINS = [
+  ['bitcoin', 'BTC'],
+  ['ethereum', 'ETH'],
+  ['solana', 'SOL'],
+  ['dogecoin', 'DOGE'],
+  ['ripple', 'XRP'],
+  ['cardano', 'ADA'],
+];
+
 async function cryptoData() {
-  const out = { btc: '—', eth: '—' };
+  const out = Object.fromEntries(COINS.map(([id]) => [id, '—']));
   try {
+    const ids = COINS.map(([id]) => id).join(',');
     const px = await (
       await fetch(
-        'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true'
+        `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`
       )
     ).json();
-    const line = (c) =>
-      `$${c.usd.toLocaleString()}　${c.usd_24h_change >= 0 ? '▲' : '▼'}${Math.abs(Math.round(c.usd_24h_change * 100) / 100)}%`;
-    out.btc = line(px.bitcoin);
-    out.eth = line(px.ethereum);
+    for (const [id] of COINS) {
+      const c = px[id];
+      if (c)
+        out[id] = `$${c.usd.toLocaleString()}　${c.usd_24h_change >= 0 ? '▲' : '▼'}${Math.abs(
+          Math.round(c.usd_24h_change * 100) / 100
+        )}%`;
+    }
   } catch {}
   return out;
 }
@@ -135,26 +149,22 @@ const components = [
   text('tw_2330', '/tw/s2330', { variant: 'h5' }),
   text('tw_note', '台股收盤資料每日 14:35 更新', { variant: 'caption' }),
 
-  // ── 加密（全即時互動）────────────────────────────
+  // ── 加密（開頁自動抓即時價；按鈕為手動刷新）────────
   { id: 'crypto_card', component: 'Card', child: 'crypto_col' },
   {
     id: 'crypto_col',
     component: 'Column',
     children: [
-      'cy_btc_label', 'cy_btc', 'cy_eth_label', 'cy_eth',
-      'cy_currency', 'cy_refresh_btn', 'cy_div',
-      'cy_query_field', 'cy_query_btn', 'cy_lookup',
+      'cy_currency',
+      ...COINS.flatMap(([id]) => [`cy_row_${id}`]),
+      'cy_status',
+      'cy_refresh_btn',
     ],
     align: 'stretch',
   },
-  text('cy_btc_label', 'Bitcoin', { variant: 'caption' }),
-  text('cy_btc', '/crypto/btc', { variant: 'h3' }),
-  text('cy_eth_label', 'Ethereum', { variant: 'caption' }),
-  text('cy_eth', '/crypto/eth', { variant: 'h3' }),
   {
     id: 'cy_currency',
     component: 'ChoicePicker',
-    label: '計價幣別',
     variant: 'mutuallyExclusive',
     displayStyle: 'chips',
     options: [
@@ -163,33 +173,26 @@ const components = [
     ],
     value: { path: '/crypto/currency' },
   },
+  ...COINS.flatMap(([id, label]) => [
+    {
+      id: `cy_row_${id}`,
+      component: 'Row',
+      children: [`cy_name_${id}`, `cy_px_${id}`],
+      justify: 'spaceBetween',
+      align: 'center',
+    },
+    text(`cy_name_${id}`, label, { variant: 'h5' }),
+    text(`cy_px_${id}`, `/crypto/px/${id}`),
+  ]),
+  text('cy_status', '/crypto/status', { variant: 'caption' }),
   {
     id: 'cy_refresh_btn',
     component: 'Button',
+    variant: 'primary',
     child: 'cy_refresh_text',
     action: { event: { name: 'refresh_crypto', context: { currency: { path: '/crypto/currency' } } } },
   },
-  text('cy_refresh_text', '🔄 即時刷新'),
-  { id: 'cy_div', component: 'Divider' },
-  {
-    id: 'cy_query_field',
-    component: 'TextField',
-    label: '查任何幣（CoinGecko id，如 solana、dogecoin）',
-    value: { path: '/crypto/queryId' },
-  },
-  {
-    id: 'cy_query_btn',
-    component: 'Button',
-    child: 'cy_query_text',
-    action: {
-      event: {
-        name: 'lookup_price',
-        context: { id: { path: '/crypto/queryId' }, currency: { path: '/crypto/currency' } },
-      },
-    },
-  },
-  text('cy_query_text', '🔍 查價'),
-  text('cy_lookup', '/crypto/lookup'),
+  text('cy_refresh_text', '🔄 刷新報價'),
 ];
 
 const now = taipeiNow();
@@ -212,7 +215,7 @@ const messages = [
       value: {
         wfh: wfhData(),
         tw,
-        crypto: { ...crypto, currency: 'usd', queryId: '', lookup: '' },
+        crypto: { px: crypto, currency: 'usd', status: '' },
         updated: `${fmt(now)} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} 更新`,
       },
     },
