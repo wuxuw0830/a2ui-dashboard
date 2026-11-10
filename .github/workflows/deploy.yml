@@ -1,0 +1,49 @@
+name: Build and deploy dashboard
+
+on:
+  schedule:
+    # 06:35 UTC = 台北 14:35，台股收盤資料出來後；每天跑（週末仍更新 crypto 與 WFH 倒數）
+    - cron: '35 6 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm run gen
+      - run: npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+      # CONSTRAINT: 排程 workflow 60 天沒 commit 會被 GitHub 停用，每月 1 號留一次 heartbeat
+      - name: Monthly keepalive
+        if: github.event_name == 'schedule'
+        run: |
+          [ "$(TZ=Asia/Taipei date +%-d)" = "1" ] || exit 0
+          git config user.name "dashboard-bot"
+          git config user.email "dashboard-bot@users.noreply.github.com"
+          date -u +%Y-%m-%dT%H:%M:%SZ > .heartbeat
+          git add .heartbeat && git commit -m "chore: monthly heartbeat" && git push
