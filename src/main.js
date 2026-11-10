@@ -106,11 +106,53 @@ async function searchCoin(query, cur) {
   }
 }
 
+// 台股全市場清單（上市+上櫃）由 CI 每日烤成同源靜態檔；首次搜尋才載入
+let twStocks = null;
+
+async function searchTw(query) {
+  const blank = () => [0, 1, 2].forEach((i) => setData(`/tw/results/${i}`, { name: '', px: '' }));
+  const q = (query || '').trim();
+  if (!q) {
+    blank();
+    return void setData('/tw/searchStatus', '輸入代號或名稱，例如 2317 或 鴻海');
+  }
+  setData('/tw/searchStatus', '搜尋中…');
+  try {
+    if (!twStocks) {
+      const res = await fetch('./data/twstocks.json');
+      if (!res.ok) throw new Error(`twstocks ${res.status}`);
+      twStocks = await res.json();
+    }
+    const qU = q.toUpperCase();
+    const exact = twStocks.filter(([code]) => code === qU);
+    const prefix = twStocks.filter(([code]) => code !== qU && code.startsWith(qU));
+    const byName = twStocks.filter(([, name]) => name.includes(q));
+    const hits = [...exact, ...prefix, ...byName].slice(0, 3);
+    if (!hits.length) {
+      blank();
+      return void setData('/tw/searchStatus', `找不到「${q}」`);
+    }
+    [0, 1, 2].forEach((i) => {
+      const r = hits[i];
+      if (!r) return void setData(`/tw/results/${i}`, { name: '', px: '' });
+      const chg = parseFloat(r[3]);
+      const px = Number.isNaN(parseFloat(r[2]))
+        ? '—'
+        : `${r[2]}　${chg >= 0 ? '▲' : '▼'}${Math.abs(chg)}`;
+      setData(`/tw/results/${i}`, { name: `${r[0]}　${r[1]}`, px });
+    });
+    setData('/tw/searchStatus', '');
+  } catch (err) {
+    setData('/tw/searchStatus', `搜尋失敗：${err.message}`);
+  }
+}
+
 async function handleAction(action) {
   const ctx = action.context ?? {};
   if (action.name === 'refresh_fx') return void (await refreshFx());
   if (action.name === 'refresh_crypto') return void (await refreshCrypto(pickCurrency(ctx.currency)));
   if (action.name === 'search_coin') return void (await searchCoin(ctx.query, pickCurrency(ctx.currency)));
+  if (action.name === 'search_tw') return void (await searchTw(ctx.query));
 }
 
 async function main() {

@@ -37,8 +37,24 @@ function wfhData() {
   };
 }
 
+// AI-INVARIANT: TW_LIST 的 code 必須與元件 id（tw_row_{code}）及 main.js 無關聯但要存在於上市清單
+const TW_LIST = [
+  ['0050', '元大台灣50'],
+  ['0056', '元大高股息'],
+  ['2330', '台積電'],
+  ['2317', '鴻海'],
+  ['2454', '聯發科'],
+  ['2881', '富邦金'],
+];
+
+const priceStr = (close, change) => {
+  const c = parseFloat(change);
+  if (Number.isNaN(parseFloat(close))) return '—';
+  return `${close}　${c >= 0 ? '▲' : '▼'}${Math.abs(c)}`;
+};
+
 async function twData() {
-  const out = { taiex: '—', change: '', s0050: '—', s2330: '—' };
+  const out = { taiex: '—', change: '', px: Object.fromEntries(TW_LIST.map(([c]) => [c, '—'])) };
   try {
     const rows = await (await fetch('https://openapi.twse.com.tw/v1/exchangeReport/FMTQIK')).json();
     const last = rows.at(-1);
@@ -46,20 +62,25 @@ async function twData() {
     const c = parseFloat(last.Change);
     out.change = `${c >= 0 ? '▲' : '▼'} ${Math.abs(c)}`;
   } catch {}
+
+  // 全市場清單（上市 + 上櫃）烤成靜態檔，讓前端同源搜尋（TWSE/TPEx 無 CORS）
+  const all = [];
   try {
-    const all = await (await fetch('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL')).json();
-    const row = (code) => all.find((r) => r.Code === code);
-    for (const [key, code, name] of [
-      ['s0050', '0050', '元大台灣50'],
-      ['s2330', '2330', '台積電'],
-    ]) {
-      const r = row(code);
-      if (r) {
-        const c = parseFloat(r.Change);
-        out[key] = `${name}　${r.ClosingPrice}　${c >= 0 ? '▲' : '▼'}${Math.abs(c)}`;
-      }
-    }
+    const twse = await (await fetch('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL')).json();
+    for (const r of twse) all.push([r.Code, r.Name, r.ClosingPrice, r.Change]);
   } catch {}
+  try {
+    const tpex = await (await fetch('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes')).json();
+    for (const r of tpex) all.push([r.SecuritiesCompanyCode, r.CompanyName, r.Close, r.Change]);
+  } catch {}
+  mkdirSync('public/data', { recursive: true });
+  writeFileSync('public/data/twstocks.json', JSON.stringify(all));
+
+  const byCode = new Map(all.map((r) => [r[0], r]));
+  for (const [code] of TW_LIST) {
+    const r = byCode.get(code);
+    if (r) out.px[code] = priceStr(r[2], r[3]);
+  }
   return out;
 }
 
@@ -157,12 +178,19 @@ const components = [
   text('wfh_fri_title', '/wfh/fridaysTitle', { variant: 'caption' }),
   text('wfh_fridays', '/wfh/fridays', { variant: 'h3' }),
 
-  // ── 台股 ─────────────────────────────────────────
+  // ── 台股（收盤資料；搜尋走同源靜態檔涵蓋上市+上櫃）──
   { id: 'tw_card', component: 'Card', child: 'tw_col' },
   {
     id: 'tw_col',
     component: 'Column',
-    children: ['tw_taiex_label', 'tw_taiex_row', 'tw_div', 'tw_0050', 'tw_2330', 'tw_note'],
+    children: [
+      'tw_taiex_label', 'tw_taiex_row', 'tw_div',
+      ...TW_LIST.map(([c]) => `tw_row_${c}`),
+      'tw_note',
+      'tw_search_field', 'tw_search_btn',
+      ...[0, 1, 2].map((i) => `tw_sr_${i}`),
+      'tw_search_status',
+    ],
     align: 'stretch',
   },
   text('tw_taiex_label', '加權指數', { variant: 'caption' }),
@@ -170,9 +198,44 @@ const components = [
   text('tw_taiex', '/tw/taiex', { variant: 'h1' }),
   text('tw_change', '/tw/change', { variant: 'h4' }),
   { id: 'tw_div', component: 'Divider' },
-  text('tw_0050', '/tw/s0050', { variant: 'h5' }),
-  text('tw_2330', '/tw/s2330', { variant: 'h5' }),
-  text('tw_note', '台股收盤資料每日 14:35 更新', { variant: 'caption' }),
+  ...TW_LIST.flatMap(([code, name]) => [
+    {
+      id: `tw_row_${code}`,
+      component: 'Row',
+      children: [`tw_name_${code}`, `tw_px_${code}`],
+      justify: 'spaceBetween',
+      align: 'center',
+    },
+    text(`tw_name_${code}`, `${code}　${name}`, { variant: 'h5' }),
+    text(`tw_px_${code}`, `/tw/px/${code}`),
+  ]),
+  text('tw_note', '收盤資料每日 14:35 更新', { variant: 'caption' }),
+  {
+    id: 'tw_search_field',
+    component: 'TextField',
+    label: '搜尋個股（代號或名稱，含上市/上櫃）',
+    value: { path: '/tw/query' },
+  },
+  {
+    id: 'tw_search_btn',
+    component: 'Button',
+    variant: 'primary',
+    child: 'tw_search_text',
+    action: { event: { name: 'search_tw', context: { query: { path: '/tw/query' } } } },
+  },
+  text('tw_search_text', '🔍 搜尋'),
+  ...[0, 1, 2].flatMap((i) => [
+    {
+      id: `tw_sr_${i}`,
+      component: 'Row',
+      children: [`tw_sr_name_${i}`, `tw_sr_px_${i}`],
+      justify: 'spaceBetween',
+      align: 'center',
+    },
+    text(`tw_sr_name_${i}`, `/tw/results/${i}/name`, { variant: 'h5' }),
+    text(`tw_sr_px_${i}`, `/tw/results/${i}/px`),
+  ]),
+  text('tw_search_status', '/tw/searchStatus', { variant: 'caption' }),
 
   // ── 加密（開頁自動抓即時價；按鈕為手動刷新）────────
   { id: 'crypto_card', component: 'Card', child: 'crypto_col' },
@@ -305,7 +368,12 @@ const messages = [
       path: '/',
       value: {
         wfh: wfhData(),
-        tw,
+        tw: {
+          ...tw,
+          query: '',
+          results: [{ name: '', px: '' }, { name: '', px: '' }, { name: '', px: '' }],
+          searchStatus: '',
+        },
         crypto: {
           px: crypto,
           currency: 'usd',
