@@ -63,12 +63,54 @@ async function refreshFx() {
   }
 }
 
+function pickCurrency(raw) {
+  return (Array.isArray(raw) ? raw[0] : raw) === 'twd' ? 'twd' : 'usd';
+}
+
+async function searchCoin(query, cur) {
+  const blank = () => [0, 1, 2].forEach((i) => setData(`/crypto/results/${i}`, { name: '', px: '' }));
+  const q = (query || '').trim();
+  if (!q) {
+    blank();
+    return void setData('/crypto/searchStatus', '輸入點什麼再搜吧');
+  }
+  setData('/crypto/searchStatus', `搜尋「${q}」中…`);
+  try {
+    const found = await (
+      await fetch(`https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(q)}`)
+    ).json();
+    const top = (found.coins ?? []).slice(0, 3);
+    if (!top.length) {
+      blank();
+      return void setData('/crypto/searchStatus', `找不到「${q}」相關的幣`);
+    }
+    const ids = top.map((c) => c.id).join(',');
+    const px = await (
+      await fetch(`${GECKO}?ids=${ids}&vs_currencies=${cur}&include_24hr_change=true`)
+    ).json();
+    [0, 1, 2].forEach((i) => {
+      const c = top[i];
+      setData(
+        `/crypto/results/${i}`,
+        c
+          ? {
+              name: `${c.symbol.toUpperCase()}　${c.name}`,
+              px: px[c.id]?.[cur] != null ? priceLine(px[c.id], cur) : '—',
+            }
+          : { name: '', px: '' }
+      );
+    });
+    setData('/crypto/searchStatus', '');
+  } catch (err) {
+    setData('/crypto/searchStatus', `搜尋失敗：${err.message}`);
+  }
+}
+
 async function handleAction(action) {
+  const ctx = action.context ?? {};
   if (action.name === 'refresh_fx') return void (await refreshFx());
-  if (action.name !== 'refresh_crypto') return;
-  const raw = action.context?.currency;
-  const cur = (Array.isArray(raw) ? raw[0] : raw) === 'twd' ? 'twd' : 'usd';
-  await refreshCrypto(cur);
+  if (action.name === 'refresh_crypto') return void (await refreshCrypto(pickCurrency(ctx.currency)));
+  if (action.name === 'search_coin') return void (await searchCoin(ctx.query, pickCurrency(ctx.currency)));
 }
 
 async function main() {

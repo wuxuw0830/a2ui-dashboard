@@ -184,6 +184,11 @@ const components = [
       ...COINS.flatMap(([id]) => [`cy_row_${id}`]),
       'cy_status',
       'cy_refresh_btn',
+      'cy_search_div',
+      'cy_search_field',
+      'cy_search_btn',
+      ...[0, 1, 2].map((i) => `cy_sr_${i}`),
+      'cy_search_status',
     ],
     align: 'stretch',
   },
@@ -218,6 +223,38 @@ const components = [
     action: { event: { name: 'refresh_crypto', context: { currency: { path: '/crypto/currency' } } } },
   },
   text('cy_refresh_text', '🔄 刷新報價'),
+  { id: 'cy_search_div', component: 'Divider' },
+  {
+    id: 'cy_search_field',
+    component: 'TextField',
+    label: '搜尋幣種（名稱或代號都行）',
+    value: { path: '/crypto/query' },
+  },
+  {
+    id: 'cy_search_btn',
+    component: 'Button',
+    variant: 'primary',
+    child: 'cy_search_text',
+    action: {
+      event: {
+        name: 'search_coin',
+        context: { query: { path: '/crypto/query' }, currency: { path: '/crypto/currency' } },
+      },
+    },
+  },
+  text('cy_search_text', '🔍 搜尋'),
+  ...[0, 1, 2].flatMap((i) => [
+    {
+      id: `cy_sr_${i}`,
+      component: 'Row',
+      children: [`cy_sr_name_${i}`, `cy_sr_px_${i}`],
+      justify: 'spaceBetween',
+      align: 'center',
+    },
+    text(`cy_sr_name_${i}`, `/crypto/results/${i}/name`, { variant: 'h5' }),
+    text(`cy_sr_px_${i}`, `/crypto/results/${i}/px`),
+  ]),
+  text('cy_search_status', '/crypto/searchStatus', { variant: 'caption' }),
 
   // ── 匯率（1 外幣 = X 台幣；開頁自動抓）───────────
   { id: 'fx_card', component: 'Card', child: 'fx_col' },
@@ -269,7 +306,14 @@ const messages = [
       value: {
         wfh: wfhData(),
         tw,
-        crypto: { px: crypto, currency: 'usd', status: '' },
+        crypto: {
+          px: crypto,
+          currency: 'usd',
+          status: '',
+          query: '',
+          results: [{ name: '', px: '' }, { name: '', px: '' }, { name: '', px: '' }],
+          searchStatus: '',
+        },
         fx: { px: fx, status: '' },
         updated: `${fmt(now)} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} 更新`,
       },
