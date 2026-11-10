@@ -7,8 +7,9 @@ const SURFACE = 'dashboard';
 
 // AI-BOUNDARY: 只有 CoinGecko 支援瀏覽器 CORS，所有即時互動都走它；TWSE 走每日預抓
 const GECKO = 'https://api.coingecko.com/api/v3/simple/price';
-// AI-INVARIANT: COINS 清單必須與 scripts/gen-dashboard.mjs 的 COINS 一致
+// AI-INVARIANT: COINS/FX 清單必須與 scripts/gen-dashboard.mjs 一致
 const COINS = ['bitcoin', 'ethereum', 'solana', 'dogecoin', 'ripple', 'cardano'];
+const FX = ['USD', 'JPY', 'EUR', 'CNY', 'KRW', 'HKD'];
 
 let processor;
 
@@ -44,7 +45,26 @@ async function refreshCrypto(cur) {
   }
 }
 
+async function refreshFx() {
+  setData('/fx/status', '更新中…');
+  try {
+    const res = await fetch('https://open.er-api.com/v6/latest/TWD');
+    if (!res.ok) throw new Error(`er-api ${res.status}`);
+    const { rates } = await res.json();
+    for (const code of FX) {
+      if (rates[code]) {
+        const twd = 1 / rates[code];
+        setData(`/fx/px/${code}`, `${twd < 1 ? twd.toFixed(4) : twd.toFixed(2)} TWD`);
+      }
+    }
+    setData('/fx/status', '1 外幣 = X 台幣｜匯率每日更新一次');
+  } catch (err) {
+    setData('/fx/status', `更新失敗：${err.message}`);
+  }
+}
+
 async function handleAction(action) {
+  if (action.name === 'refresh_fx') return void (await refreshFx());
   if (action.name !== 'refresh_crypto') return;
   const raw = action.context?.currency;
   const cur = (Array.isArray(raw) ? raw[0] : raw) === 'twd' ? 'twd' : 'usd';
@@ -67,6 +87,7 @@ async function main() {
 
   // 開頁即自動更新報價，每日預抓的資料只是首屏佔位
   refreshCrypto('usd');
+  refreshFx();
 }
 
 main().catch((err) => {

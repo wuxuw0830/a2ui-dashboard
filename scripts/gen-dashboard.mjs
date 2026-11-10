@@ -73,6 +73,30 @@ const COINS = [
   ['cardano', 'ADA'],
 ];
 
+// AI-INVARIANT: FX 清單必須與 src/main.js 的 FX 一致（代碼與顯示名）
+const FX = [
+  ['USD', '美金'],
+  ['JPY', '日圓'],
+  ['EUR', '歐元'],
+  ['CNY', '人民幣'],
+  ['KRW', '韓元'],
+  ['HKD', '港幣'],
+];
+
+async function fxData() {
+  const out = Object.fromEntries(FX.map(([c]) => [c, '—']));
+  try {
+    const { rates } = await (await fetch('https://open.er-api.com/v6/latest/TWD')).json();
+    for (const [code] of FX) {
+      if (rates[code]) {
+        const twd = 1 / rates[code];
+        out[code] = `${twd < 1 ? twd.toFixed(4) : twd.toFixed(2)} TWD`;
+      }
+    }
+  } catch {}
+  return out;
+}
+
 async function cryptoData() {
   const out = Object.fromEntries(COINS.map(([id]) => [id, '—']));
   try {
@@ -114,6 +138,7 @@ const components = [
       { title: '🏠 WFH', child: 'wfh_card' },
       { title: '📈 台股', child: 'tw_card' },
       { title: '🪙 加密', child: 'crypto_card' },
+      { title: '💱 匯率', child: 'fx_card' },
     ],
   },
 
@@ -193,10 +218,39 @@ const components = [
     action: { event: { name: 'refresh_crypto', context: { currency: { path: '/crypto/currency' } } } },
   },
   text('cy_refresh_text', '🔄 刷新報價'),
+
+  // ── 匯率（1 外幣 = X 台幣；開頁自動抓）───────────
+  { id: 'fx_card', component: 'Card', child: 'fx_col' },
+  {
+    id: 'fx_col',
+    component: 'Column',
+    children: [...FX.map(([c]) => `fx_row_${c}`), 'fx_status', 'fx_refresh_btn'],
+    align: 'stretch',
+  },
+  ...FX.flatMap(([code, name]) => [
+    {
+      id: `fx_row_${code}`,
+      component: 'Row',
+      children: [`fx_name_${code}`, `fx_px_${code}`],
+      justify: 'spaceBetween',
+      align: 'center',
+    },
+    text(`fx_name_${code}`, `${code}　${name}`, { variant: 'h5' }),
+    text(`fx_px_${code}`, `/fx/px/${code}`),
+  ]),
+  text('fx_status', '/fx/status', { variant: 'caption' }),
+  {
+    id: 'fx_refresh_btn',
+    component: 'Button',
+    variant: 'primary',
+    child: 'fx_refresh_text',
+    action: { event: { name: 'refresh_fx', context: {} } },
+  },
+  text('fx_refresh_text', '🔄 刷新匯率'),
 ];
 
 const now = taipeiNow();
-const [tw, crypto] = await Promise.all([twData(), cryptoData()]);
+const [tw, crypto, fx] = await Promise.all([twData(), cryptoData(), fxData()]);
 const messages = [
   {
     version: 'v0.9',
@@ -216,6 +270,7 @@ const messages = [
         wfh: wfhData(),
         tw,
         crypto: { px: crypto, currency: 'usd', status: '' },
+        fx: { px: fx, status: '' },
         updated: `${fmt(now)} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} 更新`,
       },
     },
